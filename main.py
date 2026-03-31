@@ -7,6 +7,9 @@ from datetime import datetime, date
 import json
 from typing import List, Optional, Dict
 from pydantic import BaseModel
+import asyncio
+from fastapi import WebSocket, WebSocketDisconnect
+import random
 
 app = FastAPI(title="Finovus API")
 
@@ -18,6 +21,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- WebSocket & Global State ---
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def lock_connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except:
+                continue
+
+manager = ConnectionManager()
+latest_data = {"meta": None, "sonuclar": []}
+simulation_task = None
 
 # --- Models ---
 class SonucRow(BaseModel):
@@ -166,6 +192,35 @@ def perform_calculation(file_content: bytes) -> dict:
         "sonuclar": sonuclar
     }
 
+async def run_simulation():
+    global latest_data
+    while True:
+        await asyncio.sleep(3) # Her 3 saniyede bir güncelle
+        if not latest_data["sonuclar"]:
+            continue
+            
+        # Bazı rakamları hafifçe oynat (Spot Satış ve Alış %0.1 civarı)
+        for row in latest_data["sonuclar"]:
+            if row["alis"]:
+                row["alis"] *= (1 + (random.random() - 0.5) * 0.001)
+            if row["spot_satis"]:
+                row["spot_satis"] *= (1 + (random.random() - 0.5) * 0.001)
+            
+            # Yeniden hesapla
+            if row["alis"] and row["spot_satis"] and row["gun"]:
+                hesaplama = ((row["spot_satis"] / row["alis"]) - 1) / row["gun"] * 365
+                row["hesaplama"] = round(hesaplama * 100, 4)
+                
+                ref = latest_data["meta"]["referans_faiz"]
+                if ref is not None:
+                    row["islem_onerisi"] = "İŞLEM YAP" if row["hesaplama"] > ref else "İŞLEM YAPMA"
+
+        # Metaları güncelle
+        latest_data["meta"]["islem_yap"] = sum(1 for r in latest_data["sonuclar"] if r["islem_onerisi"] == "İŞLEM YAP")
+        latest_data["meta"]["islem_yapma"] = sum(1 for r in latest_data["sonuclar"] if r["islem_onerisi"] == "İŞLEM YAPMA")
+        
+        await manager.broadcast(latest_data)
+
 def generate_excel(result: dict) -> BytesIO:
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
@@ -242,8 +297,14 @@ async def calculate(file: UploadFile = File(...)):
     
     try:
         content = await file.read()
-        result = perform_calculation(content)
-        return result
+        global latest_data, simulation_task
+        latest_data = perform_calculation(content)
+        
+        # Simülasyonu başlat (eğer başlamadıysa)
+        if simulation_task is None:
+            simulation_task = asyncio.create_task(run_simulation())
+            
+        return latest_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -255,6 +316,35 @@ async def export(file: UploadFile = File(...)):
         excel_file = generate_excel(result)
         
         filename = f"FINOVUS_SONUC_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        return StreamingResponse(
+            excel_file,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.lock_connect(websocket)
+    try:
+        # Bağlanınca varsa son veriyi hemen gönder
+        if latest_data["sonuclar"]:
+            await websocket.send_json(latest_data)
+        while True:
+            await websocket.receive_text() # Bağlantıyı canlı tutmak için bekler
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+class ExportData(BaseModel):
+    meta: MetaInfo
+    sonuclar: List[SonucRow]
+
+@app.post("/export-json")
+async def export_json(data: ExportData):
+    try:
+        excel_file = generate_excel(data.dict())
+        filename = f"FINOVUS_CANLI_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         return StreamingResponse(
             excel_file,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
