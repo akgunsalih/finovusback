@@ -52,6 +52,8 @@ class SonucRow(BaseModel):
     alis: Optional[float]
     spot_satis: Optional[float]
     gun: Optional[int]
+    gun_fark: Optional[float]
+    spot_gun_fark: Optional[float]
     hesaplama: Optional[float]
     referans_faiz: Optional[float]
     islem_onerisi: Optional[str]
@@ -114,7 +116,7 @@ def perform_calculation(file_content: bytes) -> dict:
         if key and val:
             sozlesme[key] = val
     
-    bugun_tarihi = sozlesme.get("Bugün")
+    bugun_tarihi = date.today()  # Gerçek bugünün tarihi (Excel'deki sabit değer yerine)
     
     # MATRİKS VERİ SPOT
     if "MATRİKS VERİ SPOT" not in wb.sheetnames:
@@ -125,7 +127,10 @@ def perform_calculation(file_content: bytes) -> dict:
     for r in spot_rows:
         sembol = str(r.get("SEMBOL", "")).strip().upper()
         try:
-            spot[sembol] = float(r["SATIŞ"])
+            satis = float(r["SATIŞ"] or 0)
+            gf = r.get("GÜN FARK %")
+            gun_fark = float(gf) if gf is not None else 0.0
+            spot[sembol] = {"satis": satis, "gun_fark": gun_fark}
         except:
             continue
             
@@ -149,7 +154,9 @@ def perform_calculation(file_content: bytes) -> dict:
         ilk_kelime = kelimeler[0].upper() if len(kelimeler) >= 1 else ""
         ikinci_kel = kelimeler[1].strip() if len(kelimeler) >= 2 else ""
         
-        spot_satis = spot.get(ilk_kelime) if ilk_kelime else None
+        spot_data = spot.get(ilk_kelime, {"satis": None, "gun_fark": None})
+        spot_satis = spot_data["satis"]
+        spot_gun_fark = spot_data["gun_fark"]
         
         gun = None
         if ikinci_kel and bugun_tarihi:
@@ -167,15 +174,25 @@ def perform_calculation(file_content: bytes) -> dict:
             hesaplama_pct = hesaplama * 100
             islem_onerisi = "İŞLEM YAP" if hesaplama_pct > referans_faiz else "İŞLEM YAPMA"
             
+        gun_fark_pct = None
+        try:
+            val = row.get("GÜN FARK %")
+            if val is not None:
+                gun_fark_pct = float(val)
+        except:
+            gun_fark_pct = 0.0
+
         sonuclar.append({
-            "kontrat": kontrat,
-            "aciklama": aciklama,
-            "alis": alis,
-            "spot_satis": spot_satis,
-            "gun": gun,
-            "hesaplama": round(hesaplama * 100, 4) if hesaplama is not None else None,
-            "referans_faiz": referans_faiz,
-            "islem_onerisi": islem_onerisi
+            "kontrat":        kontrat,
+            "aciklama":       aciklama,
+            "alis":           alis,
+            "spot_satis":     spot_satis,
+            "gun":            gun,
+            "gun_fark":       gun_fark_pct,
+            "spot_gun_fark":  spot_gun_fark,
+            "hesaplama":      round(hesaplama * 100, 4) if hesaplama is not None else None,
+            "referans_faiz":  referans_faiz,
+            "islem_onerisi":  islem_onerisi,
         })
         
     islem_yap = sum(1 for r in sonuclar if r["islem_onerisi"] == "İŞLEM YAP")
@@ -229,7 +246,7 @@ def generate_excel(result: dict) -> BytesIO:
     ws = wb_out.active
     ws.title = "SONUÇLAR"
 
-    headers = ["KONTRAT", "AÇIKLAMA", "ALIŞ", "SPOT SATIŞ", "GÜN",
+    headers = ["KONTRAT", "AÇIKLAMA", "ALIŞ", "SPOT SATIŞ", "SPOT FARK %", "VADELİ FARK %",
                "HESAPLAMA %", "REFERANS FAİZ %", "İŞLEM ÖNERİSİ"]
     ws.append(headers)
 
@@ -250,7 +267,7 @@ def generate_excel(result: dict) -> BytesIO:
     for i, r in enumerate(result["sonuclar"], start=2):
         ws.append([
             r["kontrat"], r["aciklama"], r["alis"], r["spot_satis"],
-            r["gun"], r["hesaplama"], r["referans_faiz"], r["islem_onerisi"],
+            r["spot_gun_fark"], r["gun_fark"], r["hesaplama"], r["referans_faiz"], r["islem_onerisi"],
         ])
         fill = gri if i % 2 == 0 else beyaz
         for cell in ws[i]:
