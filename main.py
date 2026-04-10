@@ -261,34 +261,7 @@ async def run_simulation():
         if not latest_data["sonuclar"]:
             continue
             
-        # Bazı rakamları hafifçe oynat (Spot Satış ve Alış %0.1 civarı)
-        for row in latest_data["sonuclar"]:
-            if row["alis"]:
-                row["alis"] *= (1 + (random.random() - 0.5) * 0.001)
-            if row["spot_satis"]:
-                row["spot_satis"] *= (1 + (random.random() - 0.5) * 0.001)
-            
-            # Yeniden hesapla
-            if row["alis"] and row["spot_satis"] and row["gun"]:
-                hesaplama = ((row["spot_satis"] / row["alis"]) - 1) / row["gun"] * 365
-                row["hesaplama"] = round(hesaplama * 100, 4)
-                
-                ref = latest_data["meta"]["referans_faiz"]
-                if ref is not None:
-                    row["islem_onerisi"] = "İŞLEM YAP" if row["hesaplama"] > ref else "İŞLEM YAPMA"
-
-        for row in latest_data.get("spot_sonuclar", []):
-            if row["son_fiyat"]: row["son_fiyat"] *= (1 + (random.random() - 0.5) * 0.001)
-            if row["alis"]: row["alis"] *= (1 + (random.random() - 0.5) * 0.001)
-            if row["satis"]: row["satis"] *= (1 + (random.random() - 0.5) * 0.001)
-
-        # Metaları güncelle
-        latest_data["meta"]["islem_yap"] = sum(1 for r in latest_data["sonuclar"] if r["islem_onerisi"] == "İŞLEM YAP")
-        latest_data["meta"]["islem_yapma"] = sum(1 for r in latest_data["sonuclar"] if r["islem_onerisi"] == "İŞLEM YAPMA")
-        
-        latest_data["meta"]["spot_islem_yap"] = sum(1 for r in latest_data.get("spot_sonuclar", []) if r["islem_onerisi"] == "İŞLEM YAP")
-        latest_data["meta"]["spot_islem_yapma"] = sum(1 for r in latest_data.get("spot_sonuclar", []) if r["islem_onerisi"] == "İŞLEM YAPMA")
-        
+        # Simülasyonu tamamen kapattık. Sadece WebSocket bağlantısını canlı tutar.
         await manager.broadcast(latest_data)
 
 def generate_excel(result: dict) -> BytesIO:
