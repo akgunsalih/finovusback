@@ -58,16 +58,28 @@ class SonucRow(BaseModel):
     referans_faiz: Optional[float]
     islem_onerisi: Optional[str]
 
+class SpotRow(BaseModel):
+    sembol: Optional[str]
+    son_fiyat: Optional[float]
+    alis: Optional[float]
+    satis: Optional[float]
+    gun_fark: Optional[float]
+    islem_onerisi: Optional[str]
+
 class MetaInfo(BaseModel):
     bugun: Optional[str]
     referans_faiz: Optional[float]
     toplam_satir: int
     islem_yap: int
     islem_yapma: int
+    spot_toplam_satir: int
+    spot_islem_yap: int
+    spot_islem_yapma: int
 
 class CalculationResult(BaseModel):
     meta: MetaInfo
     sonuclar: List[SonucRow]
+    spot_sonuclar: List[SpotRow]
 
 # --- Helper Functions (Migrated from finovus_hesapla.py) ---
 def to_date(val) -> Optional[date]:
@@ -124,15 +136,41 @@ def perform_calculation(file_content: bytes) -> dict:
         
     spot_rows = sheet_to_list(wb["MATRİKS VERİ SPOT"])
     spot = {}
+    spot_sonuclar = []
+    
     for r in spot_rows:
         sembol = str(r.get("SEMBOL", "")).strip().upper()
+        if not sembol: continue
+        
+        try:
+            son_fiyat = float(r.get("SON FİYAT") or 0)
+        except:
+            son_fiyat = None
+            
+        try:
+            alis = float(r.get("ALIŞ") or 0)
+        except:
+            alis = None
+            
         try:
             satis = float(r["SATIŞ"] or 0)
             gf = r.get("GÜN FARK %")
             gun_fark = float(gf) if gf is not None else 0.0
             spot[sembol] = {"satis": satis, "gun_fark": gun_fark}
         except:
-            continue
+            satis = None
+            gun_fark = 0.0
+            
+        islem_onerisi = "İŞLEM YAP" if gun_fark > 0 else "İŞLEM YAPMA"
+        
+        spot_sonuclar.append({
+            "sembol": sembol,
+            "son_fiyat": son_fiyat,
+            "alis": alis,
+            "satis": satis,
+            "gun_fark": gun_fark,
+            "islem_onerisi": islem_onerisi
+        })
             
     # MATRİKS VERİ VADELİ
     if "MATRİKS VERİ VADELİ" not in wb.sheetnames:
@@ -198,15 +236,22 @@ def perform_calculation(file_content: bytes) -> dict:
     islem_yap = sum(1 for r in sonuclar if r["islem_onerisi"] == "İŞLEM YAP")
     islem_yapma = sum(1 for r in sonuclar if r["islem_onerisi"] == "İŞLEM YAPMA")
     
+    spot_islem_yap = sum(1 for r in spot_sonuclar if r["islem_onerisi"] == "İŞLEM YAP")
+    spot_islem_yapma = sum(1 for r in spot_sonuclar if r["islem_onerisi"] == "İŞLEM YAPMA")
+    
     return {
         "meta": {
             "bugun": str(bugun_tarihi) if bugun_tarihi else None,
             "referans_faiz": referans_faiz,
             "toplam_satir": len(sonuclar),
             "islem_yap": islem_yap,
-            "islem_yapma": islem_yapma
+            "islem_yapma": islem_yapma,
+            "spot_toplam_satir": len(spot_sonuclar),
+            "spot_islem_yap": spot_islem_yap,
+            "spot_islem_yapma": spot_islem_yapma
         },
-        "sonuclar": sonuclar
+        "sonuclar": sonuclar,
+        "spot_sonuclar": spot_sonuclar
     }
 
 async def run_simulation():
@@ -232,9 +277,17 @@ async def run_simulation():
                 if ref is not None:
                     row["islem_onerisi"] = "İŞLEM YAP" if row["hesaplama"] > ref else "İŞLEM YAPMA"
 
+        for row in latest_data.get("spot_sonuclar", []):
+            if row["son_fiyat"]: row["son_fiyat"] *= (1 + (random.random() - 0.5) * 0.001)
+            if row["alis"]: row["alis"] *= (1 + (random.random() - 0.5) * 0.001)
+            if row["satis"]: row["satis"] *= (1 + (random.random() - 0.5) * 0.001)
+
         # Metaları güncelle
         latest_data["meta"]["islem_yap"] = sum(1 for r in latest_data["sonuclar"] if r["islem_onerisi"] == "İŞLEM YAP")
         latest_data["meta"]["islem_yapma"] = sum(1 for r in latest_data["sonuclar"] if r["islem_onerisi"] == "İŞLEM YAPMA")
+        
+        latest_data["meta"]["spot_islem_yap"] = sum(1 for r in latest_data.get("spot_sonuclar", []) if r["islem_onerisi"] == "İŞLEM YAP")
+        latest_data["meta"]["spot_islem_yapma"] = sum(1 for r in latest_data.get("spot_sonuclar", []) if r["islem_onerisi"] == "İŞLEM YAPMA")
         
         await manager.broadcast(latest_data)
 
@@ -267,7 +320,7 @@ def generate_excel(result: dict) -> BytesIO:
     for i, r in enumerate(result["sonuclar"], start=2):
         ws.append([
             r["kontrat"], r["aciklama"], r["alis"], r["spot_satis"],
-            r["spot_gun_fark"], r["gun_fark"], r["hesaplama"], r["referans_faiz"], r["islem_onerisi"],
+            r.get("spot_gun_fark"), r.get("gun_fark"), r.get("hesaplama"), r.get("referans_faiz"), r.get("islem_onerisi"),
         ])
         fill = gri if i % 2 == 0 else beyaz
         for cell in ws[i]:
@@ -275,27 +328,69 @@ def generate_excel(result: dict) -> BytesIO:
             cell.alignment = Alignment(vertical="center")
             cell.border = border
 
-        onerisi_cell = ws.cell(row=i, column=8)
-        if r["islem_onerisi"] == "İŞLEM YAP":
+        onerisi_cell = ws.cell(row=i, column=9)
+        if r.get("islem_onerisi") == "İŞLEM YAP":
             onerisi_cell.fill = yesil
             onerisi_cell.font = Font(bold=True, color="276221")
-        elif r["islem_onerisi"] == "İŞLEM YAPMA":
+        elif r.get("islem_onerisi") == "İŞLEM YAPMA":
             onerisi_cell.fill = kirmizi
             onerisi_cell.font = Font(bold=True, color="9C0006")
 
-        for col in [3, 4, 6, 7]:
+        for col in [3, 4, 7, 8]:
             c = ws.cell(row=i, column=col)
             if c.value is not None:
-                c.number_format = '0.0000' if col >= 6 else '0.00'
+                c.number_format = '0.0000' if col >= 7 else '0.00'
 
     for hdr_cell in ws[1]:
         hdr_cell.border = border
 
-    col_widths = [18, 38, 10, 12, 7, 14, 16, 18]
+    col_widths = [18, 38, 10, 12, 12, 12, 14, 16, 18]
     for i, w in enumerate(col_widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.row_dimensions[1].height = 25
     ws.freeze_panes = "A2"
+
+    # --- SPOT SONUÇLAR ---
+    if result.get("spot_sonuclar"):
+        ws_spot = wb_out.create_sheet("SPOT SONUÇLAR")
+        spot_headers = ["SEMBOL", "SON FİYAT", "ALIŞ", "SATIŞ", "GÜN FARK %", "İŞLEM ÖNERİSİ"]
+        ws_spot.append(spot_headers)
+
+        for cell in ws_spot[1]:
+            cell.fill = hdr_fill
+            cell.font = hdr_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = border
+
+        for i, r in enumerate(result["spot_sonuclar"], start=2):
+            ws_spot.append([
+                r["sembol"], r["son_fiyat"], r["alis"], r["satis"],
+                r["gun_fark"], r["islem_onerisi"],
+            ])
+            fill = gri if i % 2 == 0 else beyaz
+            for cell in ws_spot[i]:
+                cell.fill = fill
+                cell.alignment = Alignment(vertical="center")
+                cell.border = border
+
+            onerisi_cell = ws_spot.cell(row=i, column=6)
+            if r.get("islem_onerisi") == "İŞLEM YAP":
+                onerisi_cell.fill = yesil
+                onerisi_cell.font = Font(bold=True, color="276221")
+            elif r.get("islem_onerisi") == "İŞLEM YAPMA":
+                onerisi_cell.fill = kirmizi
+                onerisi_cell.font = Font(bold=True, color="9C0006")
+                
+            for col in [2, 3, 4]:
+                c = ws_spot.cell(row=i, column=col)
+                if c.value is not None:
+                    c.number_format = '0.00'
+
+        col_widths_spot = [12, 12, 12, 12, 12, 18]
+        for i, w in enumerate(col_widths_spot, 1):
+            ws_spot.column_dimensions[get_column_letter(i)].width = w
+        ws_spot.row_dimensions[1].height = 25
+        ws_spot.freeze_panes = "A2"
 
     output = BytesIO()
     wb_out.save(output)
@@ -356,6 +451,7 @@ async def websocket_endpoint(websocket: WebSocket):
 class ExportData(BaseModel):
     meta: MetaInfo
     sonuclar: List[SonucRow]
+    spot_sonuclar: Optional[List[SpotRow]] = None
 
 @app.post("/export-json")
 async def export_json(data: ExportData):
