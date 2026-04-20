@@ -287,7 +287,7 @@ def generate_excel(result: dict) -> BytesIO:
     ws = wb_out.active
     ws.title = "SONUÇLAR"
 
-    headers = ["KONTRAT", "AÇIKLAMA", "ALIŞ", "SPOT SATIŞ", "SPOT FARK %", "VADELİ FARK %",
+    headers = ["KONTRAT", "AÇIKLAMA", "ALIŞ", "SPOT SATIŞ",
                "HESAPLAMA %", "REFERANS FAİZ %", "İŞLEM ÖNERİSİ"]
     ws.append(headers)
 
@@ -308,7 +308,7 @@ def generate_excel(result: dict) -> BytesIO:
     for i, r in enumerate(result["sonuclar"], start=2):
         ws.append([
             r["kontrat"], r["aciklama"], r["alis"], r["spot_satis"],
-            r.get("spot_gun_fark"), r.get("gun_fark"), r.get("hesaplama"), r.get("referans_faiz"), r.get("islem_onerisi"),
+            r.get("hesaplama"), r.get("referans_faiz"), r.get("islem_onerisi"),
         ])
         fill = gri if i % 2 == 0 else beyaz
         for cell in ws[i]:
@@ -316,7 +316,7 @@ def generate_excel(result: dict) -> BytesIO:
             cell.alignment = Alignment(vertical="center")
             cell.border = border
 
-        onerisi_cell = ws.cell(row=i, column=9)
+        onerisi_cell = ws.cell(row=i, column=7)
         if r.get("islem_onerisi") == "İŞLEM YAP":
             onerisi_cell.fill = yesil
             onerisi_cell.font = Font(bold=True, color="276221")
@@ -324,15 +324,15 @@ def generate_excel(result: dict) -> BytesIO:
             onerisi_cell.fill = kirmizi
             onerisi_cell.font = Font(bold=True, color="9C0006")
 
-        for col in [3, 4, 7, 8]:
+        for col in [3, 4, 5, 6]:
             c = ws.cell(row=i, column=col)
             if c.value is not None:
-                c.number_format = '0.0000' if col >= 7 else '0.00'
+                c.number_format = '0.0000' if col >= 5 else '0.00'
 
     for hdr_cell in ws[1]:
         hdr_cell.border = border
 
-    col_widths = [18, 38, 10, 12, 12, 12, 14, 16, 18]
+    col_widths = [18, 38, 10, 12, 14, 16, 18]
     for i, w in enumerate(col_widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.row_dimensions[1].height = 25
