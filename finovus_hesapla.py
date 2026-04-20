@@ -9,7 +9,7 @@ Kullanım:
 Hatalar: stderr
 
 Formül:
-  HESAPLAMA = ((SATIŞ_spot / ALIŞ_vadeli) - 1) / GÜN * 365
+  HESAPLAMA = ((ALIŞ_vadeli / SATIŞ_spot) - 1) / GÜN * 365
 
   GÜN = VADE_SONU[ay_adi] - VADE_SONU["Bugün"]
         (SÖZLEŞME TARİH sheet'indeki "Bugün" satırı baz alınır)
@@ -118,7 +118,7 @@ def hesapla(input_path: str) -> dict:
         hesaplama = None
         if alis and spot_satis and spot_satis != 0 and gun and gun != 0:
             # ((SATIŞ_spot / ALIŞ_vadeli) - 1) / GÜN * 365
-            hesaplama = ((spot_satis / alis) - 1) / gun * 365
+            hesaplama = ((alis / spot_satis) - 1) / gun * 365
 
         # İŞLEM ÖNERİSİ
         islem_onerisi = None
