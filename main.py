@@ -208,7 +208,7 @@ def calculate_from_sheets(sheets_data: Dict[str, List[Dict]]) -> dict:
                 
         hesaplama = None
         if alis and spot_satis and spot_satis != 0 and gun and gun != 0:
-            hesaplama = ((spot_satis / alis) - 1) / gun * 365
+            hesaplama = ((alis / spot_satis) - 1) / gun * 365
             
         islem_onerisi = None
         if hesaplama is not None and referans_faiz is not None:
