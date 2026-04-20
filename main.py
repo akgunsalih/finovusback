@@ -135,8 +135,12 @@ def calculate_from_sheets(sheets_data: Dict[str, List[Dict]]) -> dict:
     spot_sonuclar = []
     
     for r in spot_rows:
-        sembol = str(r.get("SEMBOL", "")).strip().upper()
-        if not sembol: continue
+        sembol_raw = r.get("SEMBOL")
+        if not sembol_raw:
+            continue
+        sembol = str(sembol_raw).strip().upper()
+        if not sembol or sembol == "NONE":
+            continue
         
         try:
             son_fiyat = float(r.get("SON FİYAT") or 0)
@@ -173,7 +177,13 @@ def calculate_from_sheets(sheets_data: Dict[str, List[Dict]]) -> dict:
     sonuclar = []
     
     for row in vadeli_rows:
-        kontrat = str(row.get("KONTRAT", "") or "").strip()
+        kontrat_raw = row.get("KONTRAT")
+        if not kontrat_raw:
+            continue
+        kontrat = str(kontrat_raw).strip()
+        if not kontrat or kontrat.upper() == "NONE":
+            continue
+            
         aciklama = str(row.get("AÇIKLAMA", "") or "").strip()
         
         try:
