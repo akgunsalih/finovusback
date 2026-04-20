@@ -87,6 +87,12 @@ def to_date(val) -> Optional[date]:
         return val.date()
     if isinstance(val, date):
         return val
+    if isinstance(val, str):
+        try:
+            # ISO format (2024-04-15 or 2024-04-15T12:00:00)
+            return datetime.fromisoformat(val[:10]).date()
+        except:
+            pass
     return None
 
 def sheet_to_list(ws) -> List[Dict]:
@@ -99,14 +105,10 @@ def sheet_to_list(ws) -> List[Dict]:
         result.append(dict(zip(headers, row)))
     return result
 
-def perform_calculation(file_content: bytes) -> dict:
-    wb = openpyxl.load_workbook(BytesIO(file_content), data_only=True, keep_links=False)
-    
+# --- Core Calculation Logic ---
+def calculate_from_sheets(sheets_data: Dict[str, List[Dict]]) -> dict:
     # REFERANS FAİZ
-    if "REFERANS FAİZ" not in wb.sheetnames:
-        raise ValueError("REFERANS FAİZ sayfası bulunamadı.")
-    
-    rf_rows = sheet_to_list(wb["REFERANS FAİZ"])
+    rf_rows = sheets_data.get("REFERANS FAİZ", [])
     referans_faiz = None
     for r in rf_rows:
         if str(r.get("KOD", "")).strip() == "TLREF":
@@ -117,10 +119,7 @@ def perform_calculation(file_content: bytes) -> dict:
             break
             
     # SÖZLEŞME TARİH
-    if "SÖZLEŞME TARİH" not in wb.sheetnames:
-        raise ValueError("SÖZLEŞME TARİH sayfası bulunamadı.")
-    
-    st_rows = sheet_to_list(wb["SÖZLEŞME TARİH"])
+    st_rows = sheets_data.get("SÖZLEŞME TARİH", [])
     sozlesme = {}
     for r in st_rows:
         key = str(r.get("TARİH", "")).strip()
@@ -128,13 +127,10 @@ def perform_calculation(file_content: bytes) -> dict:
         if key and val:
             sozlesme[key] = val
     
-    bugun_tarihi = date.today()  # Gerçek bugünün tarihi (Excel'deki sabit değer yerine)
+    bugun_tarihi = date.today()
     
     # MATRİKS VERİ SPOT
-    if "MATRİKS VERİ SPOT" not in wb.sheetnames:
-        raise ValueError("MATRİKS VERİ SPOT sayfası bulunamadı.")
-        
-    spot_rows = sheet_to_list(wb["MATRİKS VERİ SPOT"])
+    spot_rows = sheets_data.get("MATRİKS VERİ SPOT", [])
     spot = {}
     spot_sonuclar = []
     
@@ -173,10 +169,7 @@ def perform_calculation(file_content: bytes) -> dict:
         })
             
     # MATRİKS VERİ VADELİ
-    if "MATRİKS VERİ VADELİ" not in wb.sheetnames:
-        raise ValueError("MATRİKS VERİ VADELİ sayfası bulunamadı.")
-        
-    vadeli_rows = sheet_to_list(wb["MATRİKS VERİ VADELİ"])
+    vadeli_rows = sheets_data.get("MATRİKS VERİ VADELİ", [])
     sonuclar = []
     
     for row in vadeli_rows:
@@ -253,6 +246,18 @@ def perform_calculation(file_content: bytes) -> dict:
         "sonuclar": sonuclar,
         "spot_sonuclar": spot_sonuclar
     }
+
+def perform_calculation(file_content: bytes) -> dict:
+    wb = openpyxl.load_workbook(BytesIO(file_content), data_only=True, keep_links=False)
+    
+    sheets_data = {}
+    for sheet_name in ["REFERANS FAİZ", "SÖZLEŞME TARİH", "MATRİKS VERİ SPOT", "MATRİKS VERİ VADELİ"]:
+        if sheet_name in wb.sheetnames:
+            sheets_data[sheet_name] = sheet_to_list(wb[sheet_name])
+        else:
+            raise ValueError(f"{sheet_name} sayfası bulunamadı.")
+            
+    return calculate_from_sheets(sheets_data)
 
 async def run_simulation():
     global latest_data
@@ -385,12 +390,36 @@ async def calculate(file: UploadFile = File(...)):
         global latest_data, simulation_task
         latest_data = perform_calculation(content)
         
+        # VERİ GELDİĞİ AN SİTEYE BAS (Bekleme yapma)
+        await manager.broadcast(latest_data)
+        
         # Simülasyonu başlat (eğer başlamadıysa)
         if simulation_task is None:
             simulation_task = asyncio.create_task(run_simulation())
             
         return latest_data
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class SyncData(BaseModel):
+    sheets: Dict[str, List[Dict]]
+
+@app.post("/calculate-json", response_model=CalculationResult)
+async def calculate_json(data: SyncData):
+    try:
+        global latest_data, simulation_task
+        latest_data = calculate_from_sheets(data.sheets)
+        
+        # VERİ GELDİĞİ AN SİTEYE BAS
+        await manager.broadcast(latest_data)
+        
+        if simulation_task is None:
+            simulation_task = asyncio.create_task(run_simulation())
+            
+        return latest_data
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/export")
