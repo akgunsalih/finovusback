@@ -10,8 +10,17 @@ from pydantic import BaseModel
 import asyncio
 from fastapi import WebSocket, WebSocketDisconnect
 import random
+import models
+import database
+from routers import auth_router
+from sqlalchemy.orm import Session
+import auth
+from fastapi import Depends
+
+models.Base.metadata.create_all(bind=database.engine)
 
 app = FastAPI(title="Finovus API")
+app.include_router(auth_router.router)
 
 # Enable CORS for frontend development
 app.add_middleware(
@@ -391,7 +400,11 @@ async def root():
     return {"status": "ok", "message": "Finovus API is running"}
 
 @app.post("/calculate", response_model=CalculationResult)
-async def calculate(file: UploadFile = File(...)):
+async def calculate(
+    file: UploadFile = File(...),
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="Lütfen geçerli bir Excel dosyası yükleyin.")
     
@@ -399,6 +412,8 @@ async def calculate(file: UploadFile = File(...)):
         content = await file.read()
         global latest_data, simulation_task
         latest_data = perform_calculation(content)
+        
+        auth.log_user_action(db, current_user.id, "UPLOAD_EXCEL", f"Dosya ile hesaplama yapıldı: {file.filename}")
         
         # VERİ GELDİĞİ AN SİTEYE BAS (Bekleme yapma)
         await manager.broadcast(latest_data)
@@ -415,8 +430,13 @@ class SyncData(BaseModel):
     sheets: Dict[str, List[Dict]]
 
 @app.post("/calculate-json", response_model=CalculationResult)
-async def calculate_json(data: SyncData):
+async def calculate_json(
+    data: SyncData,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
     try:
+        auth.log_user_action(db, current_user.id, "SYNC_JSON", "Canlı senkronizasyon verisi ile hesaplama yapıldı.")
         global latest_data, simulation_task
         latest_data = calculate_from_sheets(data.sheets)
         
@@ -433,8 +453,13 @@ async def calculate_json(data: SyncData):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/export")
-async def export(file: UploadFile = File(...)):
+async def export(
+    file: UploadFile = File(...),
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
     try:
+        auth.log_user_action(db, current_user.id, "EXPORT_EXCEL", "Sonuçlar excel olarak dışa aktarıldı.")
         content = await file.read()
         result = perform_calculation(content)
         excel_file = generate_excel(result)
@@ -466,8 +491,13 @@ class ExportData(BaseModel):
     spot_sonuclar: Optional[List[SpotRow]] = None
 
 @app.post("/export-json")
-async def export_json(data: ExportData):
+async def export_json(
+    data: ExportData,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
     try:
+        auth.log_user_action(db, current_user.id, "EXPORT_JSON", "Canlı veriler excel olarak dışa aktarıldı.")
         excel_file = generate_excel(data.dict())
         filename = f"FINOVUS_CANLI_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         return StreamingResponse(

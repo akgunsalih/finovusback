@@ -4,3 +4,6 @@ openpyxl
 python-multipart
 pydantic
 websockets
+sqlalchemy
+passlib[bcrypt]
+python-jose[cryptography]
