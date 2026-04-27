@@ -22,6 +22,27 @@ models.Base.metadata.create_all(bind=database.engine)
 app = FastAPI(title="Finovus API")
 app.include_router(auth_router.router)
 
+# --- Başlangıç Kullanıcı Seed ---
+def seed_users():
+    """Uygulama başlarken varsayılan kullanıcıları oluşturur veya şifrelerini günceller."""
+    db = next(database.get_db())
+    default_users = [
+        {"username": "admin",  "password": "Finovus2024!"},
+        {"username": "akgun1", "password": "Finovus2024!"},
+    ]
+    for u in default_users:
+        user = db.query(models.User).filter(models.User.username == u["username"]).first()
+        hashed = auth.get_password_hash(u["password"])
+        if user:
+            user.hashed_password = hashed  # Şifreyi sıfırla
+        else:
+            new_user = models.User(username=u["username"], hashed_password=hashed, is_active=True)
+            db.add(new_user)
+    db.commit()
+    db.close()
+
+seed_users()
+
 # Enable CORS for frontend development
 app.add_middleware(
     CORSMiddleware,
