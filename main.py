@@ -306,7 +306,39 @@ async def run_simulation():
         if not latest_data["sonuclar"]:
             continue
             
-        # Simülasyonu tamamen kapattık. Sadece WebSocket bağlantısını canlı tutar.
+        # --- Simülasyon: Fiyatları rastgele küçük oranda değiştir ---
+        # Spot sonuçları güncelle
+        for row in latest_data.get("spot_sonuclar", []):
+            if row.get("son_fiyat") is not None:
+                row["son_fiyat"] = round(row["son_fiyat"] * (1 + random.uniform(-0.002, 0.002)), 2)
+            if row.get("alis") is not None:
+                row["alis"] = round(row["alis"] * (1 + random.uniform(-0.002, 0.002)), 2)
+            if row.get("satis") is not None:
+                row["satis"] = round(row["satis"] * (1 + random.uniform(-0.002, 0.002)), 2)
+            if row.get("gun_fark") is not None:
+                row["gun_fark"] = round(row["gun_fark"] + random.uniform(-0.05, 0.05), 2)
+                row["islem_onerisi"] = "İŞLEM YAP" if row["gun_fark"] > 0 else "İŞLEM YAPMA"
+                
+        # Vadeli sonuçları güncelle
+        for row in latest_data.get("sonuclar", []):
+            if row.get("alis") is not None:
+                row["alis"] = round(row["alis"] * (1 + random.uniform(-0.002, 0.002)), 2)
+            if row.get("spot_satis") is not None:
+                row["spot_satis"] = round(row["spot_satis"] * (1 + random.uniform(-0.002, 0.002)), 2)
+                
+            if row.get("alis") and row.get("spot_satis") and row.get("gun"):
+                hesap = ((row["alis"] / row["spot_satis"]) - 1) / row["gun"] * 365
+                row["hesaplama"] = round(hesap * 100, 4)
+                
+                if latest_data["meta"]["referans_faiz"] is not None:
+                    row["islem_onerisi"] = "İŞLEM YAP" if row["hesaplama"] > latest_data["meta"]["referans_faiz"] else "İŞLEM YAPMA"
+
+        # Metaları güncelle
+        latest_data["meta"]["islem_yap"] = sum(1 for r in latest_data.get("sonuclar", []) if r.get("islem_onerisi") == "İŞLEM YAP")
+        latest_data["meta"]["islem_yapma"] = sum(1 for r in latest_data.get("sonuclar", []) if r.get("islem_onerisi") == "İŞLEM YAPMA")
+        latest_data["meta"]["spot_islem_yap"] = sum(1 for r in latest_data.get("spot_sonuclar", []) if r.get("islem_onerisi") == "İŞLEM YAP")
+        latest_data["meta"]["spot_islem_yapma"] = sum(1 for r in latest_data.get("spot_sonuclar", []) if r.get("islem_onerisi") == "İŞLEM YAPMA")
+
         await manager.broadcast(latest_data)
 
 def generate_excel(result: dict) -> BytesIO:
