@@ -12,7 +12,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 import random
 import models
 import database
-from routers import auth_router
+from routers import auth_router, admin_router
 from sqlalchemy.orm import Session
 import auth
 from fastapi import Depends
@@ -21,6 +21,7 @@ models.Base.metadata.create_all(bind=database.engine)
 
 app = FastAPI(title="Finovus API")
 app.include_router(auth_router.router)
+app.include_router(admin_router.router)
 
 # --- Başlangıç Kullanıcı Seed ---
 def seed_users():

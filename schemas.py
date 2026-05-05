@@ -31,3 +31,16 @@ class UserLog(BaseModel):
 
     class Config:
         from_attributes = True
+
+class PasswordUpdate(BaseModel):
+    new_password: str
+
+class AdminUserLog(BaseModel):
+    id: int
+    username: str
+    action: str
+    timestamp: datetime
+    details: Optional[str] = None
+
+    class Config:
+        from_attributes = True
