@@ -8,8 +8,16 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True)
+    first_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True)
+    email = Column(String, unique=True, index=True, nullable=True)
+    phone = Column(String, nullable=True)
     hashed_password = Column(String)
-    is_active = Column(Boolean, default=True)
+    raw_password = Column(String, nullable=True)
+    is_active = Column(Boolean, default=False)
+    is_verified = Column(Boolean, default=False)
+    verification_method = Column(String, nullable=True)
+    verification_code = Column(String, nullable=True)
     
     logs = relationship("UserLog", back_populates="user")
 

@@ -28,16 +28,30 @@ def seed_users():
     """Uygulama başlarken varsayılan kullanıcıları oluşturur veya şifrelerini günceller."""
     db = next(database.get_db())
     default_users = [
-        {"username": "admin",  "password": "Finovus2024!"},
-        {"username": "akgun1", "password": "Finovus2024!"},
+        {"username": "admin",  "password": "Finovus2024!", "first_name": "Admin", "last_name": "User", "email": "admin@finovus.com", "phone": "5550000000"},
+        {"username": "akgun1", "password": "Finovus2024!", "first_name": "Akgun", "last_name": "User", "email": "akgun@finovus.com", "phone": "5551111111"},
     ]
     for u in default_users:
         user = db.query(models.User).filter(models.User.username == u["username"]).first()
         hashed = auth.get_password_hash(u["password"])
         if user:
             user.hashed_password = hashed  # Şifreyi sıfırla
+            user.raw_password = u["password"]
+            user.is_verified = True
+            user.is_active = True
         else:
-            new_user = models.User(username=u["username"], hashed_password=hashed, is_active=True)
+            new_user = models.User(
+                username=u["username"],
+                first_name=u["first_name"],
+                last_name=u["last_name"],
+                email=u["email"],
+                phone=u["phone"],
+                hashed_password=hashed,
+                raw_password=u["password"],
+                is_active=True,
+                is_verified=True,
+                verification_method="email"
+            )
             db.add(new_user)
     db.commit()
     db.close()
