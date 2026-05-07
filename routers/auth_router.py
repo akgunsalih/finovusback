@@ -7,6 +7,46 @@ import models, schemas, auth, database
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 import random
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+# =====================================================================
+# GMAIL SMTP AYARLARI
+# Lütfen buraya kendi Gmail adresinizi ve Google Uygulama Şifrenizi girin.
+SMTP_EMAIL = "finovuspartners@gmail.com"
+SMTP_PASSWORD = "zmud loat jnyi awwn"
+# =====================================================================
+
+def send_verification_email(to_email: str, code: str, first_name: str):
+    if SMTP_EMAIL == "ornek_mail@gmail.com":
+        print("UYARI: E-posta gönderilmedi! Lütfen auth_router.py dosyasına Gmail bilgilerinizi girin.")
+        return
+        
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_EMAIL
+        msg['To'] = to_email
+        msg['Subject'] = "Finovus - Dogrulama Kodunuz"
+
+        body = f"""Merhaba {first_name},
+        
+Finovus'a hos geldiniz! Kayit isleminizi tamamlamak icin dogrulama kodunuz asagidadir:
+
+Dogrulama Kodunuz: {code}
+
+Bu kodu sisteme girerek hesabinizi aktif hale getirebilirsiniz.
+        """
+        msg.attach(MIMEText(body, 'plain', 'utf-8'))
+
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(SMTP_EMAIL, SMTP_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print(f"E-posta basariyla gonderildi: {to_email}")
+    except Exception as e:
+        print(f"E-posta gonderimi basarisiz oldu: {e}")
 
 @router.post("/register", response_model=schemas.User)
 def register(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
@@ -36,6 +76,9 @@ def register(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
     # Log registration
     auth.log_user_action(db, new_user.id, "REGISTER", f"User {new_user.username} registered. Code: {verification_code}")
     print(f"--- MOCK SENDING VERIFICATION --- \nTo: {new_user.email} & {new_user.phone}\nCode: {verification_code}\n---------------------------------")
+    
+    # Gerçek e-postayı gönder
+    send_verification_email(new_user.email, verification_code, new_user.first_name)
     
     return new_user
 
