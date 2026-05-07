@@ -18,10 +18,10 @@ SMTP_EMAIL = "finovuspartners@gmail.com"
 SMTP_PASSWORD = "zmud loat jnyi awwn"
 # =====================================================================
 
-def send_verification_email(to_email: str, code: str, first_name: str):
+def send_verification_email(to_email: str, code: str, first_name: str) -> bool:
     if SMTP_EMAIL == "ornek_mail@gmail.com":
         print("UYARI: E-posta gönderilmedi! Lütfen auth_router.py dosyasına Gmail bilgilerinizi girin.")
-        return
+        return False
         
     try:
         msg = MIMEMultipart()
@@ -39,20 +39,26 @@ Bu kodu sisteme girerek hesabinizi aktif hale getirebilirsiniz.
         """
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
+        # Birçok hosting (cPanel vb.) 587'yi engellediği için daha güvenilir olan 465 (SSL) portunu kullanıyoruz
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10)
         server.login(SMTP_EMAIL, SMTP_PASSWORD)
         server.send_message(msg)
         server.quit()
         print(f"E-posta basariyla gonderildi: {to_email}")
+        return True
     except Exception as e:
         print(f"E-posta gonderimi basarisiz oldu: {e}")
+        return False
 
 @router.post("/register", response_model=schemas.User)
 def register(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
     db_user = auth.get_user(db, username=user.username)
     if db_user:
-        raise HTTPException(status_code=400, detail="Username already registered")
+        raise HTTPException(status_code=400, detail="Bu kullanıcı adı zaten alınmış. Lütfen başka bir kullanıcı adı deneyin.")
+        
+    db_email = db.query(models.User).filter(models.User.email == user.email).first()
+    if db_email:
+        raise HTTPException(status_code=400, detail="Bu e-posta adresi ile daha önce kayıt olunmuş. Lütfen farklı bir e-posta deneyin veya giriş yapın.")
     
     hashed_password = auth.get_password_hash(user.password)
     verification_code = str(random.randint(100000, 999999))
@@ -69,6 +75,12 @@ def register(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
         is_verified=False,
         verification_code=verification_code
     )
+    
+    # Mail göndermeyi dene, başarısız olursa veritabanına kaydetme
+    email_sent = send_verification_email(new_user.email, verification_code, new_user.first_name)
+    if not email_sent:
+        raise HTTPException(status_code=500, detail="E-posta sunucusu yanıt vermedi veya mail gönderilemedi. Lütfen daha sonra tekrar deneyin.")
+        
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
@@ -76,9 +88,6 @@ def register(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
     # Log registration
     auth.log_user_action(db, new_user.id, "REGISTER", f"User {new_user.username} registered. Code: {verification_code}")
     print(f"--- MOCK SENDING VERIFICATION --- \nTo: {new_user.email} & {new_user.phone}\nCode: {verification_code}\n---------------------------------")
-    
-    # Gerçek e-postayı gönder
-    send_verification_email(new_user.email, verification_code, new_user.first_name)
     
     return new_user
 
